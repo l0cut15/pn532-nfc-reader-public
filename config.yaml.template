@@ -1,0 +1,13 @@
+home_assistant:
+  host: YOUR_HA_IP_ADDRESS  # e.g., 192.168.1.100
+  port: 8123
+  token: YOUR_LONG_LIVED_ACCESS_TOKEN  # Create this in HA Profile settings
+
+nfc_reader:
+  auto_detect: true  # Set to false to manually specify port
+  baudrate: 115200
+  location: Living Room  # Descriptive location name
+  port: /dev/cu.usbserial-XXXX  # Update with your actual device path
+  reader_id: nfc_reader_main  # Unique ID for this reader
+  reader_name: Main NFC Reader  # Human-readable name
+  timeout: 1.0
