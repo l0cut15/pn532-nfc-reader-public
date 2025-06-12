@@ -1,0 +1,42 @@
+[Unit]
+Description=NFC Card Reader Service with Home Assistant Integration
+Documentation=file://INSTALL_PATH/README.md
+After=network.target network-online.target
+Wants=network-online.target
+StartLimitBurst=3
+StartLimitIntervalSec=300
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=INSTALL_PATH
+Environment=PATH=INSTALL_PATH/nfc_env/bin:/usr/local/bin:/usr/bin:/bin
+ExecStartPre=/bin/sleep 10
+ExecStart=INSTALL_PATH/nfc_env/bin/python INSTALL_PATH/nfc_reader_service.py start
+ExecReload=/bin/kill -HUP $MAINPID
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=10
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/nfc-reader
+ReadOnlyPaths=INSTALL_PATH
+
+# Resource limits
+LimitNOFILE=65536
+MemoryMax=256M
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nfc-reader
+
+[Install]
+WantedBy=multi-user.target

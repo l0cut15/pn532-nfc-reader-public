@@ -54,14 +54,12 @@ class NFCReaderHA:
         self.serial.write(wakeup_cmd)
         time.sleep(1)  # Give more time for response
         response = self.serial.read_all()
-        print(f"🔧 Wakeup response: {response.hex() if response else 'None'}")
         
         # Get firmware version to confirm communication
         fw_cmd = b'\x00\x00\xFF\x02\xFE\xD4\x02\x2A\x00'
         self.serial.write(fw_cmd)
         time.sleep(0.5)
         response = self.serial.read_all()
-        print(f"🔧 Firmware response: {response.hex() if response else 'None'}")
     
     def _configure(self):
         """Configure PN532 for card detection"""
@@ -80,7 +78,14 @@ class NFCReaderHA:
         if not response or len(response) < 15:
             return None
         
-        return self._parse_card_data(response)
+        card_data = self._parse_card_data(response)
+        if card_data:
+            # Try to read NDEF data
+            ndef_data = self._read_ndef_record_1(card_data.get('target_id', 1))
+            if ndef_data:
+                card_data['tag_value'] = ndef_data
+        
+        return card_data
     
     def _parse_card_data(self, data):
         """Parse card data from PN532 response"""
@@ -121,8 +126,268 @@ class NFCReaderHA:
                                 'type': card_type,
                                 'protocol': 'ISO14443A',
                                 'sens_res': sens_res,
-                                'sel_res': sel_res
+                                'sel_res': sel_res,
+                                'target_id': 1  # Default target ID for PN532
                             }
+        return None
+    
+    def _read_ndef_record_1(self, target_id):
+        """Read NDEF record 1 from NFC tag"""
+        try:
+            # Read the NDEF tag starting from block 4 (typical for MIFARE Ultralight)
+            # First, read the capability container to determine NDEF structure
+            cc_data = self._read_tag_data(target_id, 3, 1)  # Read CC from block 3
+            if not cc_data:
+                return None
+            
+            # Read NDEF data starting from block 4 - need to read enough for the complete payload
+            # Read more blocks to ensure we get the complete tag ID
+            ndef_data = []
+            for block_offset in range(0, 24, 4):  # Read blocks 4, 8, 12, 16, 20, 24
+                block_data = self._read_tag_data(target_id, 4 + block_offset, 1)
+                if block_data:
+                    ndef_data.extend(block_data)
+                else:
+                    break
+            
+            if not ndef_data:
+                return None
+            
+            # Parse NDEF message to extract record 1
+            return self._parse_ndef_record_1(ndef_data)
+            
+        except Exception as e:
+            print(f"Failed to read NDEF record 1: {e}")
+            return None
+    
+    def _read_tag_data(self, target_id, start_block, num_blocks):
+        """Read data from NFC tag using InDataExchange"""
+        try:
+            # MIFARE Ultralight READ command (0x30) - reads 4 blocks at once
+            read_cmd_data = [0x30, start_block]
+            
+            # Build InDataExchange command: D4 40 TG [data]
+            # TG = target number (should be 1 for the detected card)
+            data_payload = [0xD4, 0x40, 0x01] + read_cmd_data  # Use target 1
+            
+            # Build full frame: 00 00 FF LEN LCS [data] DCS 00
+            data_len = len(data_payload)
+            lcs = (256 - data_len) & 0xFF
+            
+            cmd = [0x00, 0x00, 0xFF, data_len, lcs] + data_payload
+            
+            # Calculate DCS (Data Checksum) - checksum of data payload only
+            dcs = (256 - sum(data_payload)) & 0xFF
+            cmd.append(dcs)
+            cmd.append(0x00)  # Postamble
+            
+            self.serial.write(bytes(cmd))
+            time.sleep(0.5)  # Give more time for response
+            
+            response = self.serial.read_all()
+            
+            if not response or len(response) < 8:
+                return None
+            
+            # Parse response
+            return self._parse_data_exchange_response(response)
+            
+        except Exception as e:
+            print(f"Failed to read tag data: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def _parse_data_exchange_response(self, data):
+        """Parse InDataExchange response"""
+        data_bytes = list(data)
+        
+        # Look for response frame: 0000FF + len + lcs + D5 + 41 + status + data
+        for i in range(len(data_bytes) - 8):
+            if (data_bytes[i:i+3] == [0x00, 0x00, 0xFF] and 
+                i + 7 < len(data_bytes) and
+                data_bytes[i+5] == 0xD5 and 
+                data_bytes[i+6] == 0x41):  # InDataExchange response
+                
+                status = data_bytes[i+7]
+                
+                if status == 0x00:  # Success
+                    # Extract data payload
+                    frame_len = data_bytes[i+3]
+                    data_len = frame_len - 3  # Subtract D5, 41, status
+                    
+                    if i + 8 + data_len <= len(data_bytes):
+                        payload = data_bytes[i+8:i+8+data_len]
+                        return payload
+        
+        return None
+    
+    def _parse_ndef_record_1(self, ndef_data):
+        """Parse NDEF data to extract record 1 content"""
+        if not ndef_data or len(ndef_data) < 3:
+            return None
+        
+        try:
+            # Look for NDEF message start
+            i = 0
+            
+            # Skip initial bytes until we find NDEF message
+            while i < len(ndef_data):
+                if ndef_data[i] == 0x03:  # NDEF message TLV
+                    i += 1
+                    
+                    # Get message length
+                    if i >= len(ndef_data):
+                        break
+                    msg_len = ndef_data[i]
+                    i += 1
+                    
+                    # Now parse the NDEF record
+                    if i >= len(ndef_data):
+                        break
+                        
+                    header = ndef_data[i]
+                    
+                    # Parse header flags
+                    mb = (header & 0x80) != 0  # Message Begin
+                    me = (header & 0x40) != 0  # Message End
+                    cf = (header & 0x20) != 0  # Chunk Flag
+                    sr = (header & 0x10) != 0  # Short Record
+                    il = (header & 0x08) != 0  # ID Length present
+                    tnf = header & 0x07        # Type Name Format
+                    
+                    i += 1
+                    
+                    # Get type length
+                    if i >= len(ndef_data):
+                        break
+                    type_len = ndef_data[i]
+                    i += 1
+                    
+                    # Get payload length
+                    if sr:  # Short record
+                        if i >= len(ndef_data):
+                            break
+                        payload_len = ndef_data[i]
+                        i += 1
+                    else:  # Normal record
+                        if i + 3 >= len(ndef_data):
+                            break
+                        payload_len = (ndef_data[i] << 24) | (ndef_data[i+1] << 16) | (ndef_data[i+2] << 8) | ndef_data[i+3]
+                        i += 4
+                    
+                    # Skip ID length if present
+                    if il:
+                        if i >= len(ndef_data):
+                            break
+                        id_len = ndef_data[i]
+                        i += 1
+                    
+                    # Read type
+                    if i + type_len > len(ndef_data):
+                        break
+                    record_type = ndef_data[i:i+type_len]
+                    i += type_len
+                    
+                    # Skip ID if present
+                    if il:
+                        i += id_len
+                    
+                    # Read payload - ensure we get the complete payload
+                    if i + payload_len > len(ndef_data):
+                        # Take what we can get - the extended reading should have captured enough
+                        payload = ndef_data[i:]
+                    else:
+                        payload = ndef_data[i:i+payload_len]
+                    
+                    # Handle URI record specifically
+                    if record_type and record_type[0] == 0x55:  # 'U' for URI
+                        if payload and len(payload) > 0:
+                            uri_id = payload[0]
+                            uri_prefixes = {
+                                0x00: "",
+                                0x01: "http://www.",
+                                0x02: "https://www.",
+                                0x03: "http://",
+                                0x04: "https://",
+                                0x05: "tel:",
+                                0x06: "mailto:",
+                                0x07: "ftp://anonymous:anonymous@",
+                                0x08: "ftp://ftp.",
+                                0x09: "ftps://",
+                                0x0A: "sftp://",
+                                0x0B: "smb://",
+                                0x0C: "nfs://",
+                                0x0D: "ftp://",
+                                0x0E: "dav://",
+                                0x0F: "news:",
+                                0x10: "telnet://",
+                                0x11: "imap:",
+                                0x12: "rtsp://",
+                                0x13: "urn:",
+                                0x14: "pop:",
+                                0x15: "sip:",
+                                0x16: "sips:",
+                                0x17: "tftp:",
+                                0x18: "btspp://",
+                                0x19: "btl2cap://",
+                                0x1A: "btgoep://",
+                                0x1B: "tcpobex://",
+                                0x1C: "irdaobex://",
+                                0x1D: "file://",
+                                0x1E: "urn:epc:id:",
+                                0x1F: "urn:epc:tag:",
+                                0x20: "urn:epc:pat:",
+                                0x21: "urn:epc:raw:",
+                                0x22: "urn:epc:",
+                                0x23: "urn:nfc:"
+                            }
+                            
+                            prefix = uri_prefixes.get(uri_id, f"[{uri_id:02X}]")
+                            uri_suffix = bytes(payload[1:]).decode('utf-8', errors='ignore')
+                            full_uri = prefix + uri_suffix
+                            
+                            # Extract just the tag ID suffix from Home Assistant URLs
+                            # Pattern: https://www.home-assistant.io/tag/[TAG_ID]
+                            if '/tag/' in uri_suffix:
+                                tag_id = uri_suffix.split('/tag/')[-1]
+                                return tag_id
+                            else:
+                                # For non-HA URLs, return the full URI
+                                return full_uri
+                    
+                    # Handle text record
+                    elif record_type and record_type[0] == 0x54:  # 'T' for Text
+                        if payload and len(payload) > 0:
+                            lang_len = payload[0] & 0x3F
+                            if len(payload) > lang_len + 1:
+                                text_data = bytes(payload[lang_len + 1:])
+                                text = text_data.decode('utf-8', errors='ignore')
+                                print(f"Decoded text: {text}")
+                                return text
+                    
+                    # Fallback: return payload as text if possible
+                    try:
+                        text = bytes(payload).decode('utf-8', errors='ignore')
+                        if text.strip():
+                            return text
+                    except:
+                        pass
+                    
+                    # Last resort: return hex
+                    return ''.join(f'{b:02X}' for b in payload)
+                    
+                elif ndef_data[i] == 0x00 or ndef_data[i] == 0xFE:  # Skip padding/terminator
+                    i += 1
+                else:
+                    i += 1
+                
+        except Exception as e:
+            print(f"NDEF parsing error: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+        
         return None
     
     def test_ha_connection(self):
@@ -151,14 +416,19 @@ class NFCReaderHA:
             return False
     
     def fire_tag_scanned_event(self, card_data):
-        """Fire a tag_scanned event to Home Assistant (like mobile app)"""
+        """Fire a tag_scanned event to Home Assistant only if NDEF data is available"""
+        # Only fire event if we have NDEF tag value
+        if 'tag_value' not in card_data or not card_data['tag_value']:
+            print(f"📋 No NDEF data found for UID {card_data['uid']} - no event fired")
+            return False
+            
         if not self.ha_token:
             print("❌ No HA API token configured")
             return False
         
-        # Create the tag_scanned event payload (matching mobile app format)
+        # Create the tag_scanned event payload using NDEF value as tag_id
         event_data = {
-            'tag_id': card_data['uid'],  # Use UID as tag_id
+            'tag_id': card_data['tag_value'],  # Use NDEF value as the token/tag_id
             'device_id': self.config.get('nfc_reader.reader_id', 'nfc_reader_main')
         }
         
@@ -172,7 +442,7 @@ class NFCReaderHA:
             response = requests.post(url, headers=headers, json=event_data, timeout=5)
             
             if response.status_code == 200:
-                print(f"🏠 Fired tag_scanned event: {card_data['uid']}")
+                print(f"🏠 Fired tag_scanned event with tag_id: {card_data['tag_value']}")
                 return True
             else:
                 print(f"❌ HA API error {response.status_code}: {response.text}")
@@ -197,11 +467,15 @@ class NFCReaderHA:
                         # New card detected
                         timestamp = datetime.now().strftime("%H:%M:%S")
                         print(f"🏷️  [{timestamp}] NFC Card Detected!")
-                        print(f"   📋 UID: {card['uid']}")
+                        print(f"   📋 UID: {card['uid']} (logged only)")
                         print(f"   🎴 Type: {card['type']}")
                         print(f"   📡 Protocol: {card['protocol']}")
+                        if 'tag_value' in card and card['tag_value']:
+                            print(f"   🏷️  NDEF Tag Value: {card['tag_value']}")
+                        else:
+                            print(f"   ⚠️  No NDEF data found")
                         
-                        # Fire Home Assistant event
+                        # Fire Home Assistant event (only if NDEF data available)
                         self.fire_tag_scanned_event(card)
                         
                         print("   " + "─" * 40)
