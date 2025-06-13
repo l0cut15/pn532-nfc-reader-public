@@ -52,7 +52,7 @@ class NFCReaderHA:
         # HSU wakeup sequence that actually works
         wakeup_cmd = b'\x55\x55\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xFF\x03\xFD\xD4\x14\x01\x17\x00'
         self.serial.write(wakeup_cmd)
-        time.sleep(1)  # Give more time for response
+        time.sleep(0.2)  # Reduced wakeup delay
         response = self.serial.read_all()
         
         # Get firmware version to confirm communication
@@ -72,7 +72,7 @@ class NFCReaderHA:
         """Scan for NFC card and return card info if found"""
         scan_cmd = b'\x00\x00\xFF\x04\xFC\xD4\x4A\x01\x00\xE1\x00'
         self.serial.write(scan_cmd)
-        time.sleep(0.3)
+        time.sleep(0.1)
         
         response = self.serial.read_all()
         if not response or len(response) < 15:
@@ -132,7 +132,7 @@ class NFCReaderHA:
         return None
     
     def _read_ndef_record_1(self, target_id):
-        """Read NDEF record 1 from NFC tag"""
+        """Read NDEF record 1 from NFC tag with bulk reading and validation"""
         try:
             # Read the NDEF tag starting from block 4 (typical for MIFARE Ultralight)
             # First, read the capability container to determine NDEF structure
@@ -140,21 +140,15 @@ class NFCReaderHA:
             if not cc_data:
                 return None
             
-            # Read NDEF data starting from block 4 - need to read enough for the complete payload
-            # Read more blocks to ensure we get the complete tag ID
-            ndef_data = []
-            for block_offset in range(0, 24, 4):  # Read blocks 4, 8, 12, 16, 20, 24
-                block_data = self._read_tag_data(target_id, 4 + block_offset, 1)
-                if block_data:
-                    ndef_data.extend(block_data)
-                else:
-                    break
+            # Read NDEF data in larger chunks for better performance
+            # Read blocks 4-47 to ensure we get complete NDEF messages (176 bytes total)
+            ndef_data = self._read_tag_data_bulk(target_id, 4, 44)
             
-            if not ndef_data:
+            if not ndef_data or len(ndef_data) < 4:  # Need at least TLV header
                 return None
             
-            # Parse NDEF message to extract record 1
-            return self._parse_ndef_record_1(ndef_data)
+            # Parse NDEF message to extract record 1 with validation
+            return self._parse_ndef_record_1_validated(ndef_data)
             
         except Exception as e:
             print(f"Failed to read NDEF record 1: {e}")
@@ -182,7 +176,7 @@ class NFCReaderHA:
             cmd.append(0x00)  # Postamble
             
             self.serial.write(bytes(cmd))
-            time.sleep(0.5)  # Give more time for response
+            time.sleep(0.1)  # Optimized response time
             
             response = self.serial.read_all()
             
@@ -221,6 +215,246 @@ class NFCReaderHA:
                         return payload
         
         return None
+    
+    def _read_tag_data_bulk(self, target_id, start_block, num_blocks):
+        """Read multiple blocks from NFC tag in bulk for better performance"""
+        try:
+            all_data = []
+            blocks_per_read = 4  # MIFARE Ultralight reads 4 blocks at once
+            max_retries = 2
+            
+            for block_start in range(start_block, start_block + num_blocks, blocks_per_read):
+                block_data = None
+                
+                # Retry failed reads to handle intermittent communication issues
+                for retry in range(max_retries):
+                    block_data = self._read_tag_data(target_id, block_start, 1)
+                    if block_data:
+                        break
+                    elif retry < max_retries - 1:
+                        time.sleep(0.05)  # Brief pause before retry
+                
+                if block_data:
+                    all_data.extend(block_data)
+                else:
+                    # For NDEF reading, we need the complete message
+                    # If we're past block 8 and have some data, return what we have
+                    if block_start > start_block + 16 and len(all_data) > 50:
+                        break
+                    else:
+                        # Early blocks are critical, fail if we can't read them
+                        return None
+            
+            return all_data if all_data else None
+            
+        except Exception as e:
+            print(f"Failed to bulk read tag data: {e}")
+            return None
+    
+    def _parse_ndef_record_1_validated(self, ndef_data):
+        """Parse NDEF data with complete record validation"""
+        if not ndef_data or len(ndef_data) < 3:
+            return None
+        
+        try:
+            # Look for NDEF message start
+            i = 0
+            
+            # Skip initial bytes until we find NDEF message
+            while i < len(ndef_data):
+                if ndef_data[i] == 0x03:  # NDEF message TLV
+                    i += 1
+                    
+                    # Get message length
+                    if i >= len(ndef_data):
+                        break
+                    msg_len = ndef_data[i]
+                    i += 1
+                    
+                    # Validate we have enough data for the complete message
+                    if i + msg_len > len(ndef_data):
+                        # Try to read more data if we're close
+                        if len(ndef_data) - i > msg_len * 0.8:  # We have at least 80% of the message
+                            available_data = ndef_data[i:len(ndef_data)]
+                            if len(available_data) > 10:  # Minimum viable NDEF record
+                                result = self._parse_first_ndef_record(available_data)
+                                if result:
+                                    return result
+                        return None
+                    
+                    # Extract the complete NDEF message
+                    ndef_message = ndef_data[i:i + msg_len]
+                    
+                    # Parse the first record with length validation
+                    return self._parse_first_ndef_record(ndef_message)
+                    
+                elif ndef_data[i] == 0x00 or ndef_data[i] == 0xFE:  # Skip padding/terminator
+                    i += 1
+                else:
+                    i += 1
+                
+        except Exception as e:
+            print(f"NDEF validation error: {e}")
+            return None
+        
+        return None
+    
+    def _parse_first_ndef_record(self, ndef_message):
+        """Parse the first NDEF record with complete validation"""
+        if not ndef_message or len(ndef_message) < 3:
+            return None
+        
+        try:
+            i = 0
+            header = ndef_message[i]
+            
+            # Parse header flags
+            mb = (header & 0x80) != 0  # Message Begin
+            me = (header & 0x40) != 0  # Message End
+            cf = (header & 0x20) != 0  # Chunk Flag
+            sr = (header & 0x10) != 0  # Short Record
+            il = (header & 0x08) != 0  # ID Length present
+            tnf = header & 0x07        # Type Name Format
+            
+            i += 1
+            
+            # Get type length
+            if i >= len(ndef_message):
+                return None
+            type_len = ndef_message[i]
+            i += 1
+            
+            # Get payload length
+            if sr:  # Short record
+                if i >= len(ndef_message):
+                    return None
+                payload_len = ndef_message[i]
+                i += 1
+            else:  # Normal record
+                if i + 3 >= len(ndef_message):
+                    return None
+                payload_len = (ndef_message[i] << 24) | (ndef_message[i+1] << 16) | (ndef_message[i+2] << 8) | ndef_message[i+3]
+                i += 4
+            
+            # Skip ID length if present
+            id_len = 0
+            if il:
+                if i >= len(ndef_message):
+                    return None
+                id_len = ndef_message[i]
+                i += 1
+            
+            # Validate we have enough data for type, id, and payload
+            required_len = type_len + id_len + payload_len
+            if i + required_len > len(ndef_message):
+                return None
+            
+            # Read type
+            record_type = ndef_message[i:i+type_len]
+            i += type_len
+            
+            # Skip ID if present
+            if il:
+                i += id_len
+            
+            # Read complete payload
+            payload = ndef_message[i:i+payload_len]
+            
+            # Validate minimum tag ID length
+            tag_value = self._extract_tag_value(record_type, payload)
+            if tag_value and len(tag_value.strip()) >= 8:  # Minimum 8 chars for valid tag ID
+                return tag_value
+            else:
+                return None
+                
+        except Exception as e:
+            print(f"NDEF record parsing error: {e}")
+            return None
+        
+        return None
+    
+    def _extract_tag_value(self, record_type, payload):
+        """Extract tag value from NDEF record payload"""
+        try:
+            # Handle URI record specifically
+            if record_type and record_type[0] == 0x55:  # 'U' for URI
+                if payload and len(payload) > 0:
+                    uri_id = payload[0]
+                    uri_prefixes = {
+                        0x00: "",
+                        0x01: "http://www.",
+                        0x02: "https://www.",
+                        0x03: "http://",
+                        0x04: "https://",
+                        0x05: "tel:",
+                        0x06: "mailto:",
+                        0x07: "ftp://anonymous:anonymous@",
+                        0x08: "ftp://ftp.",
+                        0x09: "ftps://",
+                        0x0A: "sftp://",
+                        0x0B: "smb://",
+                        0x0C: "nfs://",
+                        0x0D: "ftp://",
+                        0x0E: "dav://",
+                        0x0F: "news:",
+                        0x10: "telnet://",
+                        0x11: "imap:",
+                        0x12: "rtsp://",
+                        0x13: "urn:",
+                        0x14: "pop:",
+                        0x15: "sip:",
+                        0x16: "sips:",
+                        0x17: "tftp:",
+                        0x18: "btspp://",
+                        0x19: "btl2cap://",
+                        0x1A: "btgoep://",
+                        0x1B: "tcpobex://",
+                        0x1C: "irdaobex://",
+                        0x1D: "file://",
+                        0x1E: "urn:epc:id:",
+                        0x1F: "urn:epc:tag:",
+                        0x20: "urn:epc:pat:",
+                        0x21: "urn:epc:raw:",
+                        0x22: "urn:epc:",
+                        0x23: "urn:nfc:"
+                    }
+                    
+                    prefix = uri_prefixes.get(uri_id, f"[{uri_id:02X}]")
+                    uri_suffix = bytes(payload[1:]).decode('utf-8', errors='ignore')
+                    full_uri = prefix + uri_suffix
+                    
+                    # Extract just the tag ID suffix from Home Assistant URLs
+                    # Pattern: https://www.home-assistant.io/tag/[TAG_ID]
+                    if '/tag/' in uri_suffix:
+                        tag_id = uri_suffix.split('/tag/')[-1]
+                        return tag_id
+                    else:
+                        # For non-HA URLs, return the full URI
+                        return full_uri
+            
+            # Handle text record
+            elif record_type and record_type[0] == 0x54:  # 'T' for Text
+                if payload and len(payload) > 0:
+                    lang_len = payload[0] & 0x3F
+                    if len(payload) > lang_len + 1:
+                        text_data = bytes(payload[lang_len + 1:])
+                        text = text_data.decode('utf-8', errors='ignore')
+                        return text
+            
+            # Fallback: return payload as text if possible
+            try:
+                text = bytes(payload).decode('utf-8', errors='ignore')
+                if text.strip():
+                    return text
+            except:
+                pass
+            
+            # Last resort: return hex
+            return ''.join(f'{b:02X}' for b in payload)
+            
+        except Exception as e:
+            print(f"Tag value extraction error: {e}")
+            return None
     
     def _parse_ndef_record_1(self, ndef_data):
         """Parse NDEF data to extract record 1 content"""
@@ -487,7 +721,7 @@ class NFCReaderHA:
                         print(f"📤 [{timestamp}] Card removed")
                         self.last_uid = None
                 
-                time.sleep(0.5)
+                time.sleep(0.2)
                 
         except KeyboardInterrupt:
             print("\n👋 Stopping NFC monitor...")
