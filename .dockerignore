@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+nfc_env/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Logs
+*.log
+logs/
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Environment files (SECURITY)
+.env
+.env.*
+config.yaml
+docker-config.yaml
+
+# Service files
+*.service
+install-service.sh
+
+# Development/testing files
+*_test.py
+*_debug.py
+quick_test.py
+serial_test.py
+
+# Documentation
+README.md

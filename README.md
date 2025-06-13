@@ -21,7 +21,38 @@ A robust Python service for reading NFC cards using a USB-connected PN532 reader
 - PN532 NFC module connected via USB-to-serial adapter (like CH340)
 - Compatible with any PN532 breakout board
 
-## Quick Installation
+## Installation Options
+
+Choose your preferred installation method:
+
+### 🐳 Docker (Recommended)
+
+**Quick Start:**
+```bash
+# 1. Copy environment template
+cp .env.template .env
+# Edit .env with your Home Assistant token and settings
+
+# 2. Find your NFC device
+ls /dev/cu.*        # macOS
+ls /dev/tty*        # Linux
+
+# 3. Update device path in docker-compose.yml, then run
+docker-compose up -d
+```
+
+**Pull from Registry:**
+```bash
+# GitHub Container Registry
+docker pull ghcr.io/OWNER/REPO:latest
+
+# Docker Hub  
+docker pull l0cut15/nfc-reader:latest
+```
+
+📖 **[Complete Docker Setup Guide](#docker-deployment)**
+
+### 🐍 Native Python Installation
 
 ### Prerequisites
 - Python 3.7+
@@ -79,15 +110,13 @@ sudo systemctl status nfc-reader
 journalctl -u nfc-reader -f
 ```
 
-### Interactive Testing
+### Test Installation
 
 Test the application before installing as a service:
 ```bash
 source nfc_env/bin/activate
 python nfc_reader_ha_events.py
 ```
-
-**Note:** Use `nfc_reader_ha_events.py` for interactive testing as a normal user. The `nfc_reader_service.py` file is designed for systemd service operation and requires root permissions for logging.
 
 ## Usage
 
@@ -99,7 +128,7 @@ Once installed as a service, the NFC reader runs automatically:
 - Auto-restarts on failures
 
 ### Manual Operation
-For testing or development:
+For testing:
 ```bash
 source nfc_env/bin/activate
 python nfc_reader_ha_events.py
@@ -251,19 +280,16 @@ The NFC reader fires `tag_scanned` events with this structure:
 
 This release includes the following files required for installation and operation:
 
-### Core Files (Required)
-- **`nfc_reader_service.py`** - Main systemd service daemon
-- **`nfc_reader_ha_events.py`** - Interactive testing script (use for manual testing)
-- **`nfc_config.py`** - Configuration parser and device detection
-- **`config.yaml.template`** - Configuration template (**must be copied to `config.yaml` and configured**)
+### Core Files
+- **`nfc_reader_service.py`** - Main service application
+- **`nfc_reader_ha_events.py`** - Interactive version  
+- **`nfc_config.py`** - Configuration handler
+- **`config.yaml.template`** - Configuration template
 - **`requirements.txt`** - Python dependencies
 
 ### Service Installation
-- **`install-service.sh`** - Systemd service installation script
-- **`nfc-reader.service`** - Systemd service template
-
-### Documentation
-- **`README.md`** - Complete installation and usage guide
+- **`install-service.sh`** - Service installer
+- **`nfc-reader.service`** - Systemd service file
 
 ### Configuration Required
 After cloning, you **must**:
@@ -274,19 +300,19 @@ After cloning, you **must**:
 ## Project Structure
 
 ```
-pn532-nfc-reader/
-├── nfc_reader_service.py      # Main service application with HA integration
-├── nfc_reader_ha_events.py    # Interactive testing script (recommended for manual use)
-├── nfc_config.py              # Configuration file parser and device detection
-├── install-service.sh         # Systemd service installation script
-├── nfc-reader.service         # Systemd service template
-├── config.yaml.template       # Configuration template (COPY AND CONFIGURE)
+nfc-reader/
+├── nfc_reader_service.py      # Main service application
+├── nfc_reader_ha_events.py    # Interactive version
+├── nfc_config.py              # Configuration handler
+├── install-service.sh         # Service installer
+├── nfc-reader.service         # Systemd service file
+├── config.yaml.template       # Configuration template
 ├── requirements.txt          # Python dependencies
-├── README.md                 # This documentation
-└── Additional files:
-    ├── nfc_env/                  # Python virtual environment (created during setup)
-    ├── config.yaml               # Your configuration (copy from template)
-    └── Development files (optional)...
+├── Dockerfile                # Docker container build
+├── docker-compose.yml        # Docker service orchestration
+├── .env.template             # Docker environment variables template
+├── docker-env-config.py      # Docker configuration loader
+└── README.md                 # This documentation
 ```
 
 
@@ -373,29 +399,6 @@ diff config.yaml.template config.yaml
 - `pyyaml` - Configuration file parsing
 - `requests` - HTTP API communication with Home Assistant
 
-## Development
-
-### Running Tests
-```bash
-# Test serial communication
-python serial_test.py
-
-# Test PN532 detection
-python quick_test.py
-
-# Debug mode with verbose output
-python nfc_debug.py
-```
-
-### Manual Development Setup
-```bash
-# Install in development mode
-source nfc_env/bin/activate
-pip install -e .
-
-# Run with debug output
-python nfc_reader_service.py --debug
-```
 
 ## License
 
@@ -410,3 +413,77 @@ MIT License - feel free to modify and distribute.
 5. Submit a pull request
 
 For bugs and feature requests, please open an issue.
+
+---
+
+## Docker Deployment
+
+### Quick Docker Setup
+
+1. **Environment Configuration:**
+   ```bash
+   cp .env.template .env
+   # Edit .env with your settings:
+   # - HA_TOKEN: Your Home Assistant long-lived access token
+   # - HA_HOST: Your HA server address (use host.docker.internal for Docker Desktop)
+   # - NFC_PORT: Device path (/dev/ttyUSB0 for most setups)
+   ```
+
+2. **Device Detection:**
+   ```bash
+   # macOS (look for cu.usbserial-*)
+   ls /dev/cu.*
+   
+   # Linux (look for ttyUSB* or ttyACM*)
+   ls /dev/tty*
+   ```
+
+3. **Update docker-compose.yml:**
+   Edit the `devices` section to match your NFC device path.
+
+4. **Deploy:**
+   ```bash
+   docker-compose up -d
+   ```
+
+### Registry Images
+
+**GitHub Container Registry (Recommended):**
+```bash
+docker pull ghcr.io/OWNER/REPO:latest
+```
+
+**Docker Hub:**
+```bash
+docker pull l0cut15/nfc-reader:latest
+```
+
+### Docker Commands
+
+```bash
+# View logs
+docker-compose logs -f nfc-reader
+
+# Stop service
+docker-compose down
+
+# Rebuild and restart
+docker-compose build --no-cache
+docker-compose up -d
+
+# Health check
+docker-compose exec nfc-reader python nfc_reader_service.py health
+```
+
+### Device Access Notes
+
+**macOS:** Use `/dev/cu.usbserial-*` device paths
+**Linux:** Use `/dev/ttyUSB0` or `/dev/ttyACM0` paths  
+**Permissions:** May require privileged mode or specific device mapping
+
+### Security Features
+
+- ✅ No secrets in Docker image
+- ✅ Environment-based configuration  
+- ✅ Registry-safe builds
+- ✅ Minimal attack surface
