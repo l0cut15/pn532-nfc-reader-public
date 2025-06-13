@@ -44,7 +44,7 @@ docker-compose up -d
 **Pull from Registry:**
 ```bash
 # GitHub Container Registry
-docker pull ghcr.io/l0cut15/nfc-reader:latest
+docker pull ghcr.io/l0cut15/pn532-nfc-reader-public:latest
 
 # Docker Hub  
 docker pull l0cut15/nfc-reader:latest
@@ -450,7 +450,7 @@ For bugs and feature requests, please open an issue.
 
 **GitHub Container Registry (Recommended):**
 ```bash
-docker pull ghcr.io/l0cut15/nfc-reader:latest
+docker pull ghcr.io/l0cut15/pn532-nfc-reader-public:latest
 ```
 
 **Docker Hub:**
