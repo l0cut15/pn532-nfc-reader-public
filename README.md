@@ -25,7 +25,7 @@ A robust Python service for reading NFC cards using a USB-connected PN532 reader
 
 Choose your preferred installation method:
 
-### 🐳 Docker (Recommended)
+### 🐳 Docker
 
 **Quick Start:**
 ```bash
@@ -46,7 +46,7 @@ docker-compose up -d
 # GitHub Container Registry
 docker pull ghcr.io/l0cut15/pn532-nfc-reader-public:latest
 
-# Docker Hub  
+# Docker Hub
 docker pull l0cut15/nfc-reader:latest
 ```
 
@@ -138,7 +138,7 @@ python nfc_reader_ha_events.py
 ```bash
 # Control the service
 sudo systemctl start nfc-reader     # Start service
-sudo systemctl stop nfc-reader      # Stop service  
+sudo systemctl stop nfc-reader      # Stop service
 sudo systemctl restart nfc-reader   # Restart service
 sudo systemctl enable nfc-reader    # Enable auto-start on boot
 sudo systemctl disable nfc-reader   # Disable auto-start
@@ -255,12 +255,12 @@ The NFC reader fires `tag_scanned` events with this structure:
 ### Integration Steps
 
 1. **Auto-register tags**: When you scan a new NDEF tag, it automatically appears in HA under Settings → Tags
-2. **Fire events**: Each NDEF scan fires a `tag_scanned` event that you can use in automations  
+2. **Fire events**: Each NDEF scan fires a `tag_scanned` event that you can use in automations
 3. **Create automations**: In HA, go to Settings → Automations → Create → Tag and select your scanned tag
 
 **Example automation uses:**
 - Toggle lights when scanning a tag
-- Set thermostat temperature 
+- Set thermostat temperature
 - Trigger scenes or scripts
 - Send notifications
 - Control media players
@@ -282,7 +282,7 @@ This release includes the following files required for installation and operatio
 
 ### Core Files
 - **`nfc_reader_service.py`** - Main service application
-- **`nfc_reader_ha_events.py`** - Interactive version  
+- **`nfc_reader_ha_events.py`** - Interactive version
 - **`nfc_config.py`** - Configuration handler
 - **`config.yaml.template`** - Configuration template
 - **`requirements.txt`** - Python dependencies
@@ -433,7 +433,7 @@ For bugs and feature requests, please open an issue.
    ```bash
    # macOS (look for cu.usbserial-*)
    ls /dev/cu.*
-   
+
    # Linux (look for ttyUSB* or ttyACM*)
    ls /dev/tty*
    ```
@@ -478,12 +478,12 @@ docker-compose exec nfc-reader python nfc_reader_service.py health
 ### Device Access Notes
 
 **macOS:** Use `/dev/cu.usbserial-*` device paths
-**Linux:** Use `/dev/ttyUSB0` or `/dev/ttyACM0` paths  
+**Linux:** Use `/dev/ttyUSB0` or `/dev/ttyACM0` paths
 **Permissions:** May require privileged mode or specific device mapping
 
 ### Security Features
 
 - ✅ No secrets in Docker image
-- ✅ Environment-based configuration  
+- ✅ Environment-based configuration
 - ✅ Registry-safe builds
 - ✅ Minimal attack surface

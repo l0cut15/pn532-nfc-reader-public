@@ -1,40 +1,41 @@
-version: '3.8'
+version: "3.8"
 
 services:
   nfc-reader:
-    build: .
+    image: ghcr.io/l0cut15/pn532-nfc-reader-public:latest
     container_name: nfc-reader
     restart: unless-stopped
-    
+
     # Device access - CRITICAL for NFC reader
     # Uncomment the appropriate device mapping for your system:
-    
-    # macOS (most common)
+
+    # Linux (most common)
     devices:
-      - "/dev/cu.usbserial-*:/dev/ttyUSB0"  # macOS USB serial device
-    
+      - "/dev/ttyUSB0:/dev/ttyUSB0" # Linux USB serial device
+
     # Linux alternatives (comment out macOS line above and uncomment below)
     # devices:
-    #   - "/dev/ttyUSB0:/dev/ttyUSB0"       # Linux USB serial device  
+    #   - "/dev/ttyUSB0:/dev/ttyUSB0"       # Linux USB serial device
+    #   - "/dev/cu.usbserial-*:/dev/ttyUSB0"  # macOS USB serial device
     #   - "/dev/ttyACM0:/dev/ttyACM0"       # Linux USB ACM device
-    
+
     # Last resort: privileged mode for broader hardware access
     # privileged: true
-    
+
     # Volume mounts
     volumes:
-      - nfc-logs:/var/log/nfc-reader       # Persistent logs
-      - /dev:/dev:ro                       # Device access (alternative approach)
-    
+      - nfc-logs:/var/log/nfc-reader # Persistent logs
+      - /dev:/dev:ro # Device access (alternative approach)
+
     # Environment variables from .env file
     env_file:
       - .env
     environment:
       - PYTHONUNBUFFERED=1
-    
+
     # Network mode for Home Assistant communication
-    network_mode: host  # Simplifies HA communication
-    
+    network_mode: host # Simplifies HA communication
+
     # Health check
     healthcheck:
       test: ["CMD", "python", "nfc_reader_service.py", "health"]
