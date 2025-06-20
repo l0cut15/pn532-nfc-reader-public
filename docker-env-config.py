@@ -26,6 +26,7 @@ class DockerNFCConfig:
                 'auto_detect': os.getenv('NFC_AUTO_DETECT', 'false').lower() == 'true',
                 'baudrate': int(os.getenv('NFC_BAUDRATE', '115200')),
                 'location': os.getenv('NFC_LOCATION', 'Docker Container'),
+                'payload_type': os.getenv('NFC_PAYLOAD_TYPE', 'ndef').lower(),
                 'port': os.getenv('NFC_PORT', '/dev/ttyUSB0'),
                 'reader_id': os.getenv('NFC_READER_ID', 'nfc_reader_docker'),
                 'reader_name': os.getenv('NFC_READER_NAME', 'Docker NFC Reader'),

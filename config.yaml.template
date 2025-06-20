@@ -7,6 +7,7 @@ nfc_reader:
   auto_detect: true  # Set to false to manually specify port
   baudrate: 115200
   location: Living Room  # Descriptive location name
+  payload_type: ndef  # 'ndef' to use NDEF content, 'uuid' to use card UID
   port: /dev/cu.usbserial-XXXX  # Update with your actual device path
   reader_id: nfc_reader_main  # Unique ID for this reader
   reader_name: Main NFC Reader  # Human-readable name

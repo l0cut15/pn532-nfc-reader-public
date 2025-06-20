@@ -2,7 +2,10 @@
 """
 NFC Tag Reader with Home Assistant Event Integration
 Sends tag_scanned events directly to HA API (like mobile app)
+Version 2.2 - Configurable NDEF/UUID payload delivery
 """
+
+__version__ = "2.2"
 
 import serial
 import time
@@ -650,19 +653,30 @@ class NFCReaderHA:
             return False
     
     def fire_tag_scanned_event(self, card_data):
-        """Fire a tag_scanned event to Home Assistant only if NDEF data is available"""
-        # Only fire event if we have NDEF tag value
-        if 'tag_value' not in card_data or not card_data['tag_value']:
-            print(f"📋 No NDEF data found for UID {card_data['uid']} - no event fired")
-            return False
-            
+        """Fire a tag_scanned event to Home Assistant using configurable payload type"""
         if not self.ha_token:
             print("❌ No HA API token configured")
             return False
         
-        # Create the tag_scanned event payload using NDEF value as tag_id
+        # Get payload type configuration (default to 'ndef' for backward compatibility)
+        payload_type = self.config.get('nfc_reader.payload_type', 'ndef').lower()
+        
+        # Determine tag_id based on payload type
+        if payload_type == 'uuid':
+            # Use UUID as tag_id
+            tag_id = card_data['uid']
+            print(f"📋 Using UUID as payload: {tag_id}")
+        else:
+            # Use NDEF content as tag_id (default behavior)
+            if 'tag_value' not in card_data or not card_data['tag_value']:
+                print(f"📋 No NDEF data found for UID {card_data['uid']} - no event fired")
+                return False
+            tag_id = card_data['tag_value']
+            print(f"📋 Using NDEF content as payload: {tag_id}")
+        
+        # Create the tag_scanned event payload
         event_data = {
-            'tag_id': card_data['tag_value'],  # Use NDEF value as the token/tag_id
+            'tag_id': tag_id,
             'device_id': self.config.get('nfc_reader.reader_id', 'nfc_reader_main')
         }
         
@@ -676,7 +690,7 @@ class NFCReaderHA:
             response = requests.post(url, headers=headers, json=event_data, timeout=5)
             
             if response.status_code == 200:
-                print(f"🏠 Fired tag_scanned event with tag_id: {card_data['tag_value']}")
+                print(f"🏠 Fired tag_scanned event with tag_id: {tag_id}")
                 return True
             else:
                 print(f"❌ HA API error {response.status_code}: {response.text}")

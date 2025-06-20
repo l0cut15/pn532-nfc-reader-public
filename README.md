@@ -11,8 +11,9 @@ A robust Python service for reading NFC cards using a USB-connected PN532 reader
 - 📡 ISO14443A protocol support
 - 🔄 Continuous monitoring with timestamps
 - 📤 Card removal detection
-- 🏠 **Smart Home Assistant integration** - fires events only with NDEF content
-- 🎯 **Tag ID as token** - uses NDEF record content instead of UID for events
+- 🏠 **Smart Home Assistant integration** - configurable payload delivery
+- 🎯 **Flexible payload types** - configurable NDEF content or UID as tag token
+- ⚙️ **Configurable event triggering** - NDEF-only or UUID-based events
 - 🔧 Systemd service for automatic startup
 - 📊 Comprehensive logging and monitoring
 
@@ -87,6 +88,7 @@ nano config.yaml
 - **Home Assistant host**: Your HA server IP address (e.g., `192.168.1.100:8123`)
 - **HA Token**: Create a Long-Lived Access Token in HA Profile settings
 - **Device path**: Auto-detected, or specify manually (e.g., `/dev/ttyUSB0`)
+- **Payload type**: Choose 'ndef' for NDEF content or 'uuid' for card UID as event payload
 
 4. **Connect your PN532:**
    - Connect PN532 to USB-to-serial adapter
@@ -156,10 +158,10 @@ sudo ./install-service.sh status    # Show detailed status
 
 **What it does:**
 - Detects NFC cards and reads NDEF content from record 1
-- **Only fires `tag_scanned` events when NDEF data is available**
-- Uses NDEF tag content as the token (not UID) for Home Assistant
+- **Configurable event triggering:** NDEF-only mode or UUID-based mode
+- **Flexible payload delivery:** Uses NDEF content or card UID as token based on configuration
 - Automatically registers new tags in HA (just like the mobile app)
-- Creates automations in HA using the actual tag content for actions
+- Creates automations in HA using the configured payload for actions
 - Provides continuous monitoring with automatic reconnection
 
 Place NFC cards near the reader to detect them. The application will:
@@ -168,7 +170,9 @@ Place NFC cards near the reader to detect them. The application will:
 - Identify card type (MIFARE Classic, Ultralight, etc.)
 - Record detection timestamps
 - Detect card removal events
-- **Send events to Home Assistant only when NDEF content is found**
+- **Send events to Home Assistant based on configured payload type:**
+  - **NDEF mode:** Only when NDEF content is found (uses NDEF content as tag_id)
+  - **UUID mode:** For all detected cards (uses card UID as tag_id)
 
 ## Example Output
 
@@ -228,7 +232,9 @@ Jun 12 12:38:29 rpi4 nfc-reader[13581]: 2025-06-12 12:38:29 - Starting NFC card 
 - MIFARE Plus
 - Blank or unformatted tags
 
-**Note:** Only cards with programmed NDEF content will fire Home Assistant events. Cards without NDEF data will be detected and logged but no events will be sent.
+**Note:** Event firing behavior depends on `payload_type` configuration:
+- **NDEF mode (`payload_type: ndef`)**: Only cards with NDEF content fire events
+- **UUID mode (`payload_type: uuid`)**: All detected cards fire events using their UID
 
 ## Home Assistant Integration
 
@@ -239,16 +245,22 @@ The NFC reader fires `tag_scanned` events with this structure:
 {
   "event_type": "tag_scanned",
   "data": {
-    "tag_id": "df72ea0e-c986-42a1-adcf-4313201c63c8",  // NDEF content, not UID
+    "tag_id": "df72ea0e-c986-42a1-adcf-4313201c63c8",  // NDEF content or UID based on payload_type
     "device_id": "nfc_reader_main"
   }
 }
 ```
 
+**Payload Examples:**
+- **NDEF mode**: `tag_id` contains NDEF record content (e.g., "df72ea0e-c986-42a1-adcf-4313201c63c8")
+- **UUID mode**: `tag_id` contains card UID (e.g., "0447DF7ADF6180")
+
 ### Key Behavior Changes
 
-- **Events only fire for NDEF tags**: Blank tags are detected but don't fire events
-- **Tag ID is NDEF content**: Uses actual tag data instead of hardware UID
+- **Configurable event triggering**: Choose between NDEF-only or UUID-based event firing
+- **Flexible tag ID source**: Uses NDEF content or card UID based on `payload_type` setting
+- **NDEF mode**: Events only fire for tags with NDEF content (tag_id = NDEF content)
+- **UUID mode**: Events fire for all detected cards (tag_id = card UID)
 - **Supports Home Assistant tag URLs**: Automatically extracts tag IDs from `home-assistant.io/tag/` URLs
 - **Backward compatible**: Works with existing HA tag automations
 
@@ -374,6 +386,34 @@ python3 -c "import yaml; yaml.safe_load(open('config.yaml'))"
 # Compare with template
 diff config.yaml.template config.yaml
 ```
+
+## Configuration Reference
+
+### Payload Type Configuration
+
+The `payload_type` setting in `config.yaml` determines what data is sent to Home Assistant as the `tag_id`:
+
+```yaml
+nfc_reader:
+  payload_type: ndef  # or 'uuid'
+```
+
+**Available Options:**
+
+- **`ndef`** (Default): Uses NDEF record content as tag_id
+  - Only fires events for tags with NDEF data
+  - Compatible with Home Assistant mobile app tags
+  - Best for programmed NFC tags with specific content
+  
+- **`uuid`**: Uses card hardware UID as tag_id
+  - Fires events for all detected NFC cards
+  - Works with blank/unformatted tags
+  - Best for using physical card identity regardless of content
+
+**Migration Notes:**
+- Existing setups default to `ndef` mode for backward compatibility
+- Change to `uuid` mode if you want to detect blank tags or use hardware UIDs
+- Tags registered in HA will have different IDs when switching modes
 
 ## Technical Details
 

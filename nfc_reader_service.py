@@ -2,7 +2,10 @@
 """
 NFC Tag Reader Service - systemd compatible daemon
 Service wrapper for the NFC reader with proper daemon behavior
+Version 2.2 - Configurable NDEF/UUID payload delivery
 """
+
+__version__ = "2.2"
 
 import sys
 import signal
