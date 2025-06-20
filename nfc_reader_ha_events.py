@@ -2,10 +2,7 @@
 """
 NFC Tag Reader with Home Assistant Event Integration
 Sends tag_scanned events directly to HA API (like mobile app)
-Version 2.2 - Configurable NDEF/UUID payload delivery
 """
-
-__version__ = "2.2"
 
 import serial
 import time
