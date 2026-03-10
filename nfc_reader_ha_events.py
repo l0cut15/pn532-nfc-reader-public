@@ -627,7 +627,7 @@ class NFCReaderHA:
     def test_ha_connection(self):
         """Test Home Assistant API connection"""
         if not self.ha_token or self.ha_token == 'YOUR_LONG_LIVED_ACCESS_TOKEN':
-            print("❌ Please set your Home Assistant long-lived access token in config.yaml")
+            print("❌ Please set your Home Assistant long-lived access token in .env")
             print("   Go to HA → Profile → Long-Lived Access Tokens → Create Token")
             return False
         
@@ -650,30 +650,19 @@ class NFCReaderHA:
             return False
     
     def fire_tag_scanned_event(self, card_data):
-        """Fire a tag_scanned event to Home Assistant using configurable payload type"""
+        """Fire a tag_scanned event to Home Assistant only if NDEF data is available"""
+        # Only fire event if we have NDEF tag value
+        if 'tag_value' not in card_data or not card_data['tag_value']:
+            print(f"📋 No NDEF data found for UID {card_data['uid']} - no event fired")
+            return False
+            
         if not self.ha_token:
             print("❌ No HA API token configured")
             return False
         
-        # Get payload type configuration (default to 'ndef' for backward compatibility)
-        payload_type = self.config.get('nfc_reader.payload_type', 'ndef').lower()
-        
-        # Determine tag_id based on payload type
-        if payload_type == 'uuid':
-            # Use UUID as tag_id
-            tag_id = card_data['uid']
-            print(f"📋 Using UUID as payload: {tag_id}")
-        else:
-            # Use NDEF content as tag_id (default behavior)
-            if 'tag_value' not in card_data or not card_data['tag_value']:
-                print(f"📋 No NDEF data found for UID {card_data['uid']} - no event fired")
-                return False
-            tag_id = card_data['tag_value']
-            print(f"📋 Using NDEF content as payload: {tag_id}")
-        
-        # Create the tag_scanned event payload
+        # Create the tag_scanned event payload using NDEF value as tag_id
         event_data = {
-            'tag_id': tag_id,
+            'tag_id': card_data['tag_value'],  # Use NDEF value as the token/tag_id
             'device_id': self.config.get('nfc_reader.reader_id', 'nfc_reader_main')
         }
         
@@ -685,14 +674,14 @@ class NFCReaderHA:
         try:
             url = f"{self.ha_url}/api/events/tag_scanned"
             response = requests.post(url, headers=headers, json=event_data, timeout=5)
-            
+
             if response.status_code == 200:
-                print(f"🏠 Fired tag_scanned event with tag_id: {tag_id}")
+                print(f"🏠 Fired tag_scanned event with tag_id: {card_data['tag_value']}")
                 return True
             else:
                 print(f"❌ HA API error {response.status_code}: {response.text}")
                 return False
-                
+
         except Exception as e:
             print(f"❌ Failed to fire HA event: {e}")
             return False
@@ -754,7 +743,7 @@ def main():
         print("\n💡 To fix this:")
         print("1. Go to Home Assistant → Profile → Long-Lived Access Tokens")
         print("2. Create a new token")
-        print("3. Copy the token to config.yaml under home_assistant.token")
+        print("3. Copy the token to .env as HA_TOKEN=<your_token>")
         return 1
     
     # Connect to serial port

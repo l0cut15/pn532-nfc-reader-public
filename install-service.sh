@@ -44,9 +44,10 @@ install_service() {
         exit 1
     fi
     
-    # Check if config exists
-    if [[ ! -f "$SCRIPT_DIR/config.yaml" ]]; then
-        echo -e "${YELLOW}Warning: config.yaml not found. Copy from config.yaml.template and configure${NC}"
+    # Check if .env exists
+    if [[ ! -f "$SCRIPT_DIR/.env" ]]; then
+        echo -e "${YELLOW}Warning: .env not found. Copy from .env.template and configure:${NC}"
+        echo -e "${YELLOW}  cp $SCRIPT_DIR/.env.template $SCRIPT_DIR/.env${NC}"
     fi
     
     # Create log directory
@@ -72,7 +73,7 @@ install_service() {
     echo -e "${GREEN}✅ Service installed successfully${NC}"
     echo ""
     echo "Next steps:"
-    echo "1. Configure config.yaml with your Home Assistant settings"
+    echo "1. Configure .env with your Home Assistant settings (cp .env.template .env)"
     echo "2. Start the service: sudo systemctl start $SERVICE_NAME"
     echo "3. Check status: sudo systemctl status $SERVICE_NAME"
     echo "4. View logs: sudo journalctl -u $SERVICE_NAME -f"

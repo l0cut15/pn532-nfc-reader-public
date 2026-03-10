@@ -11,6 +11,7 @@ Type=simple
 User=root
 Group=root
 WorkingDirectory=INSTALL_PATH
+EnvironmentFile=INSTALL_PATH/.env
 Environment=PATH=INSTALL_PATH/nfc_env/bin:/usr/local/bin:/usr/bin:/bin
 ExecStartPre=/bin/sleep 10
 ExecStart=INSTALL_PATH/nfc_env/bin/python INSTALL_PATH/nfc_reader_service.py start

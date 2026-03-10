@@ -1,6 +1,24 @@
-# Configuration with secrets
+# Secrets and local config
+.env
 config.yaml
+
+# Legacy templates (replaced by .env.template)
+env.template
+
+# Claude Code
+CLAUDE.md
+.claude/
 
 # Python
 __pycache__/
-*.pyc.DS_Store
+*.pyc
+*.pyo
+
+# Virtual environment
+nfc_env/
+venv/
+env/
+
+# OS
+.DS_Store
+Thumbs.db

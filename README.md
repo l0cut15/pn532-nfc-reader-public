@@ -11,9 +11,8 @@ A robust Python service for reading NFC cards using a USB-connected PN532 reader
 - 📡 ISO14443A protocol support
 - 🔄 Continuous monitoring with timestamps
 - 📤 Card removal detection
-- 🏠 **Smart Home Assistant integration** - configurable payload delivery
-- 🎯 **Flexible payload types** - configurable NDEF content or UID as tag token
-- ⚙️ **Configurable event triggering** - NDEF-only or UUID-based events
+- 🏠 **Smart Home Assistant integration** - fires events only with NDEF content
+- 🎯 **Tag ID as token** - uses NDEF record content instead of UID for events
 - 🔧 Systemd service for automatic startup
 - 📊 Comprehensive logging and monitoring
 
@@ -26,7 +25,7 @@ A robust Python service for reading NFC cards using a USB-connected PN532 reader
 
 Choose your preferred installation method:
 
-### 🐳 Docker
+### 🐳 Docker (Recommended)
 
 **Quick Start:**
 ```bash
@@ -47,7 +46,7 @@ docker-compose up -d
 # GitHub Container Registry
 docker pull ghcr.io/l0cut15/pn532-nfc-reader-public:latest
 
-# Docker Hub
+# Docker Hub  
 docker pull l0cut15/nfc-reader:latest
 ```
 
@@ -77,18 +76,17 @@ pip install -r requirements.txt
 
 3. **Configure the application:**
 ```bash
-# Copy the template config file
-cp config.yaml.template config.yaml
+# Copy the template env file
+cp .env.template .env
 
-# Edit config.yaml with your settings
-nano config.yaml
+# Edit .env with your settings
+nano .env
 ```
 
 **Required configuration:**
-- **Home Assistant host**: Your HA server IP address (e.g., `192.168.1.100:8123`)
-- **HA Token**: Create a Long-Lived Access Token in HA Profile settings
-- **Device path**: Auto-detected, or specify manually (e.g., `/dev/ttyUSB0`)
-- **Payload type**: Choose 'ndef' for NDEF content or 'uuid' for card UID as event payload
+- **HA_HOST**: Your HA server IP address (e.g., `192.168.1.100`)
+- **HA_TOKEN**: Create a Long-Lived Access Token in HA Profile settings
+- **NFC_PORT**: Auto-detected by default, or set `NFC_AUTO_DETECT=false` and specify manually (e.g., `/dev/ttyUSB0`)
 
 4. **Connect your PN532:**
    - Connect PN532 to USB-to-serial adapter
@@ -140,7 +138,7 @@ python nfc_reader_ha_events.py
 ```bash
 # Control the service
 sudo systemctl start nfc-reader     # Start service
-sudo systemctl stop nfc-reader      # Stop service
+sudo systemctl stop nfc-reader      # Stop service  
 sudo systemctl restart nfc-reader   # Restart service
 sudo systemctl enable nfc-reader    # Enable auto-start on boot
 sudo systemctl disable nfc-reader   # Disable auto-start
@@ -158,10 +156,10 @@ sudo ./install-service.sh status    # Show detailed status
 
 **What it does:**
 - Detects NFC cards and reads NDEF content from record 1
-- **Configurable event triggering:** NDEF-only mode or UUID-based mode
-- **Flexible payload delivery:** Uses NDEF content or card UID as token based on configuration
+- **Only fires `tag_scanned` events when NDEF data is available**
+- Uses NDEF tag content as the token (not UID) for Home Assistant
 - Automatically registers new tags in HA (just like the mobile app)
-- Creates automations in HA using the configured payload for actions
+- Creates automations in HA using the actual tag content for actions
 - Provides continuous monitoring with automatic reconnection
 
 Place NFC cards near the reader to detect them. The application will:
@@ -170,9 +168,7 @@ Place NFC cards near the reader to detect them. The application will:
 - Identify card type (MIFARE Classic, Ultralight, etc.)
 - Record detection timestamps
 - Detect card removal events
-- **Send events to Home Assistant based on configured payload type:**
-  - **NDEF mode:** Only when NDEF content is found (uses NDEF content as tag_id)
-  - **UUID mode:** For all detected cards (uses card UID as tag_id)
+- **Send events to Home Assistant only when NDEF content is found**
 
 ## Example Output
 
@@ -232,9 +228,7 @@ Jun 12 12:38:29 rpi4 nfc-reader[13581]: 2025-06-12 12:38:29 - Starting NFC card 
 - MIFARE Plus
 - Blank or unformatted tags
 
-**Note:** Event firing behavior depends on `payload_type` configuration:
-- **NDEF mode (`payload_type: ndef`)**: Only cards with NDEF content fire events
-- **UUID mode (`payload_type: uuid`)**: All detected cards fire events using their UID
+**Note:** Only cards with programmed NDEF content will fire Home Assistant events. Cards without NDEF data will be detected and logged but no events will be sent.
 
 ## Home Assistant Integration
 
@@ -245,34 +239,28 @@ The NFC reader fires `tag_scanned` events with this structure:
 {
   "event_type": "tag_scanned",
   "data": {
-    "tag_id": "df72ea0e-c986-42a1-adcf-4313201c63c8",  // NDEF content or UID based on payload_type
+    "tag_id": "df72ea0e-c986-42a1-adcf-4313201c63c8",  // NDEF content, not UID
     "device_id": "nfc_reader_main"
   }
 }
 ```
 
-**Payload Examples:**
-- **NDEF mode**: `tag_id` contains NDEF record content (e.g., "df72ea0e-c986-42a1-adcf-4313201c63c8")
-- **UUID mode**: `tag_id` contains card UID (e.g., "0447DF7ADF6180")
-
 ### Key Behavior Changes
 
-- **Configurable event triggering**: Choose between NDEF-only or UUID-based event firing
-- **Flexible tag ID source**: Uses NDEF content or card UID based on `payload_type` setting
-- **NDEF mode**: Events only fire for tags with NDEF content (tag_id = NDEF content)
-- **UUID mode**: Events fire for all detected cards (tag_id = card UID)
+- **Events only fire for NDEF tags**: Blank tags are detected but don't fire events
+- **Tag ID is NDEF content**: Uses actual tag data instead of hardware UID
 - **Supports Home Assistant tag URLs**: Automatically extracts tag IDs from `home-assistant.io/tag/` URLs
 - **Backward compatible**: Works with existing HA tag automations
 
 ### Integration Steps
 
 1. **Auto-register tags**: When you scan a new NDEF tag, it automatically appears in HA under Settings → Tags
-2. **Fire events**: Each NDEF scan fires a `tag_scanned` event that you can use in automations
+2. **Fire events**: Each NDEF scan fires a `tag_scanned` event that you can use in automations  
 3. **Create automations**: In HA, go to Settings → Automations → Create → Tag and select your scanned tag
 
 **Example automation uses:**
 - Toggle lights when scanning a tag
-- Set thermostat temperature
+- Set thermostat temperature 
 - Trigger scenes or scripts
 - Send notifications
 - Control media players
@@ -295,8 +283,8 @@ This release includes the following files required for installation and operatio
 ### Core Files
 - **`nfc_reader_service.py`** - Main service application
 - **`nfc_reader_ha_events.py`** - Interactive version
-- **`nfc_config.py`** - Configuration handler
-- **`config.yaml.template`** - Configuration template
+- **`nfc_config.py`** - Configuration handler (reads from env vars)
+- **`.env.template`** - Configuration template
 - **`requirements.txt`** - Python dependencies
 
 ### Service Installation
@@ -305,8 +293,8 @@ This release includes the following files required for installation and operatio
 
 ### Configuration Required
 After cloning, you **must**:
-1. Copy `config.yaml.template` to `config.yaml`
-2. Edit `config.yaml` with your Home Assistant host, token, and device settings
+1. Copy `.env.template` to `.env`
+2. Edit `.env` with your Home Assistant host, token, and device settings
 3. Create virtual environment and install dependencies from `requirements.txt`
 
 ## Project Structure
@@ -315,16 +303,14 @@ After cloning, you **must**:
 nfc-reader/
 ├── nfc_reader_service.py      # Main service application
 ├── nfc_reader_ha_events.py    # Interactive version
-├── nfc_config.py              # Configuration handler
+├── nfc_config.py              # Configuration handler (env-var based)
 ├── install-service.sh         # Service installer
 ├── nfc-reader.service         # Systemd service file
-├── config.yaml.template       # Configuration template
-├── requirements.txt          # Python dependencies
-├── Dockerfile                # Docker container build
-├── docker-compose.yml        # Docker service orchestration
-├── .env.template             # Docker environment variables template
-├── docker-env-config.py      # Docker configuration loader
-└── README.md                 # This documentation
+├── .env.template              # Configuration template (all deployments)
+├── requirements.txt           # Python dependencies
+├── Dockerfile                 # Docker container build
+├── docker-compose.yml         # Docker service orchestration
+└── README.md                  # This documentation
 ```
 
 
@@ -348,7 +334,7 @@ sudo systemctl restart nfc-reader
 ### Common Problems
 
 **Service won't start:**
-- Check that config.yaml exists and is properly configured
+- Check that .env exists and is properly configured
 - Verify PN532 device is connected and detected
 - Ensure virtual environment exists: `ls nfc_env/`
 - Check logs: `journalctl -u nfc-reader -n 20`
@@ -366,7 +352,7 @@ sudo systemctl restart nfc-reader
 - Cards must be within ~3cm of the reader
 
 **Home Assistant Connection:**
-- Verify HA host/IP and port in config.yaml
+- Verify HA_HOST and HA_PORT in .env
 - Check that Long-Lived Access Token is valid
 - Ensure HA is accessible from the device running the service
 - Test API connection: check service logs for connection status
@@ -378,42 +364,14 @@ sudo systemctl restart nfc-reader
 
 ### Configuration Issues
 
-**Invalid config.yaml:**
+**Missing or invalid .env:**
 ```bash
-# Validate your config syntax
-python3 -c "import yaml; yaml.safe_load(open('config.yaml'))"
+# Check .env exists and has required values
+grep -E "HA_HOST|HA_TOKEN" .env
 
 # Compare with template
-diff config.yaml.template config.yaml
+diff .env.template .env
 ```
-
-## Configuration Reference
-
-### Payload Type Configuration
-
-The `payload_type` setting in `config.yaml` determines what data is sent to Home Assistant as the `tag_id`:
-
-```yaml
-nfc_reader:
-  payload_type: ndef  # or 'uuid'
-```
-
-**Available Options:**
-
-- **`ndef`** (Default): Uses NDEF record content as tag_id
-  - Only fires events for tags with NDEF data
-  - Compatible with Home Assistant mobile app tags
-  - Best for programmed NFC tags with specific content
-  
-- **`uuid`**: Uses card hardware UID as tag_id
-  - Fires events for all detected NFC cards
-  - Works with blank/unformatted tags
-  - Best for using physical card identity regardless of content
-
-**Migration Notes:**
-- Existing setups default to `ndef` mode for backward compatibility
-- Change to `uuid` mode if you want to detect blank tags or use hardware UIDs
-- Tags registered in HA will have different IDs when switching modes
 
 ## Technical Details
 
@@ -436,7 +394,6 @@ nfc_reader:
 
 ### Dependencies
 - `pyserial` - Serial communication with PN532
-- `pyyaml` - Configuration file parsing
 - `requests` - HTTP API communication with Home Assistant
 
 
@@ -473,7 +430,7 @@ For bugs and feature requests, please open an issue.
    ```bash
    # macOS (look for cu.usbserial-*)
    ls /dev/cu.*
-
+   
    # Linux (look for ttyUSB* or ttyACM*)
    ls /dev/tty*
    ```
@@ -518,12 +475,12 @@ docker-compose exec nfc-reader python nfc_reader_service.py health
 ### Device Access Notes
 
 **macOS:** Use `/dev/cu.usbserial-*` device paths
-**Linux:** Use `/dev/ttyUSB0` or `/dev/ttyACM0` paths
+**Linux:** Use `/dev/ttyUSB0` or `/dev/ttyACM0` paths  
 **Permissions:** May require privileged mode or specific device mapping
 
 ### Security Features
 
 - ✅ No secrets in Docker image
-- ✅ Environment-based configuration
+- ✅ Environment-based configuration  
 - ✅ Registry-safe builds
 - ✅ Minimal attack surface

@@ -15,9 +15,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application files
 COPY *.py ./
 
-# Copy Docker-specific config loader
-COPY docker-env-config.py ./nfc_config.py
-
 # Create non-root user for security (optional, can run as root for device access)
 RUN groupadd -r nfc && useradd -r -g nfc nfc
 
