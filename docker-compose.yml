@@ -1,22 +1,17 @@
-version: '3.8'
-
 services:
   nfc-reader:
-    build: .
+    image: ghcr.io/l0cut15/pn532-nfc-reader:latest
     container_name: nfc-reader
     restart: unless-stopped
-    
+
     # Device access - CRITICAL for NFC reader
     # Uncomment the appropriate device mapping for your system:
-    
-    # macOS (most common)
     devices:
-      - "/dev/cu.usbserial-*:/dev/ttyUSB0"  # macOS USB serial device
-    
-    # Linux alternatives (comment out macOS line above and uncomment below)
+      - "/dev/ttyUSB0:/dev/ttyUSB0"       # Linux USB serial device
+
+    # Linux ACM alternative (e.g. CH340 on some kernels)
     # devices:
-    #   - "/dev/ttyUSB0:/dev/ttyUSB0"       # Linux USB serial device  
-    #   - "/dev/ttyACM0:/dev/ttyACM0"       # Linux USB ACM device
+    #   - "/dev/ttyACM0:/dev/ttyACM0"     # Linux USB ACM device
     
     # Last resort: privileged mode for broader hardware access
     # privileged: true
@@ -25,6 +20,7 @@ services:
     volumes:
       - nfc-logs:/var/log/nfc-reader       # Persistent logs
       - /dev:/dev:ro                       # Device access (alternative approach)
+      - ./data:/app/data                   # Persists .nfc_reader_registration.json
     
     # Environment variables from .env file
     env_file:
@@ -46,3 +42,6 @@ services:
 volumes:
   nfc-logs:
     driver: local
+
+# data/ directory is bind-mounted (not a named volume) so .nfc_reader_registration.json
+# survives container recreation without needing a separate volume entry.

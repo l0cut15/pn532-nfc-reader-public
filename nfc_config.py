@@ -46,7 +46,19 @@ class NFCConfig:
                 'reader_id':   os.getenv('NFC_READER_ID', 'nfc_reader_main'),
                 'reader_name': os.getenv('NFC_READER_NAME', 'Main NFC Reader'),
                 'location':    os.getenv('NFC_LOCATION', 'Living Room'),
-            }
+            },
+            'websocket': {
+                'enabled':       os.getenv('HA_WS_ENABLED', 'true').lower() == 'true',
+                'heartbeat':     int(os.getenv('HA_WS_HEARTBEAT', '30')),
+                'reconnect_max': int(os.getenv('HA_WS_RECONNECT_MAX', '60')),
+            },
+            'device': {
+                'name': os.getenv('DEVICE_NAME', 'PN532 NFC Reader'),
+            },
+            'scan': {
+                'queue_max':     int(os.getenv('SCAN_QUEUE_MAX', '50')),
+                'stale_seconds': int(os.getenv('SCAN_STALE_SECONDS', '300')),
+            },
         }
 
     def get(self, key_path, default=None):

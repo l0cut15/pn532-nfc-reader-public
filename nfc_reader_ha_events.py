@@ -4,6 +4,7 @@ NFC Tag Reader with Home Assistant Event Integration
 Sends tag_scanned events directly to HA API (like mobile app)
 """
 
+import asyncio
 import serial
 import time
 import sys
@@ -71,10 +72,13 @@ class NFCReaderHA:
     def scan_for_card(self):
         """Scan for NFC card and return card info if found"""
         scan_cmd = b'\x00\x00\xFF\x04\xFC\xD4\x4A\x01\x00\xE1\x00'
-        self.serial.write(scan_cmd)
-        time.sleep(0.1)
-        
-        response = self.serial.read_all()
+        try:
+            self.serial.write(scan_cmd)
+            time.sleep(0.1)
+            response = self.serial.read_all()
+        except OSError as e:
+            raise RuntimeError(f"Serial device disconnected: {e}") from e
+
         if not response or len(response) < 15:
             return None
         
@@ -732,29 +736,129 @@ class NFCReaderHA:
             self.serial.close()
 
 
+async def _async_monitoring_loop(reader, scanner) -> None:
+    """Async monitoring loop for WebSocket mode; wraps blocking NFC I/O in a thread."""
+    print("\n📡 Monitoring for NFC cards (WebSocket mode)...")
+    print("Tag scans will be delivered via HA mobile_app webhook")
+    print("Press Ctrl+C to exit\n")
+
+    last_uid = None
+    try:
+        while True:
+            try:
+                card = await asyncio.to_thread(reader.scan_for_card)
+            except RuntimeError as e:
+                print(f"\n❌ {e}")
+                print("   NFC reader disconnected. Exiting.")
+                return
+
+            if card:
+                if card['uid'] != last_uid:
+                    timestamp = datetime.now().strftime("%H:%M:%S")
+                    print(f"🏷️  [{timestamp}] NFC Card Detected!")
+                    print(f"   📋 UID: {card['uid']} (logged only)")
+                    print(f"   🎴 Type: {card['type']}")
+                    if card.get('tag_value'):
+                        print(f"   🏷️  NDEF Tag Value: {card['tag_value']}")
+                        ok = await scanner.scan_tag(card['tag_value'])
+                        if ok:
+                            print(f"   🏠 Delivered via WebSocket")
+                        else:
+                            print(f"   ⚠️  WebSocket delivery failed (queued or no connection)")
+                    else:
+                        print(f"   ⚠️  No NDEF data found")
+                    print("   " + "─" * 40)
+                    last_uid = card['uid']
+            else:
+                if last_uid:
+                    timestamp = datetime.now().strftime("%H:%M:%S")
+                    print(f"📤 [{timestamp}] Card removed")
+                    last_uid = None
+
+            await asyncio.sleep(0.2)
+
+    except asyncio.CancelledError:
+        pass
+
+
+async def _async_main() -> int:
+    """Async entry point for WebSocket mode."""
+    from ha_registration import DeviceRegistrar
+    from ha_tag_scanner import TagScanner
+    from ha_websocket import HAWebSocketClient
+
+    print("🎯 PN532 NFC Reader - Home Assistant Events (WebSocket mode)")
+    print("=" * 50)
+
+    config = get_nfc_config()
+    ha_host = config.get('home_assistant.host')
+    ha_port = config.get('home_assistant.port', 8123)
+    ha_token = config.get('home_assistant.token')
+    device_name = config.get('device.name', 'PN532 NFC Reader')
+    heartbeat = config.get('websocket.heartbeat', 30)
+    reconnect_max = config.get('websocket.reconnect_max', 60)
+    queue_max = config.get('scan.queue_max', 50)
+    stale_seconds = config.get('scan.stale_seconds', 300)
+
+    reader = NFCReaderHA()
+
+    connected = await asyncio.to_thread(reader.connect_serial)
+    if not connected:
+        return 1
+
+    ws_client = HAWebSocketClient(
+        ha_host, ha_port, ha_token,
+        heartbeat=heartbeat,
+        reconnect_max=reconnect_max,
+    )
+    registrar = DeviceRegistrar(ha_host, ha_port, ha_token, device_name=device_name)
+    scanner = TagScanner(ws_client, registrar, queue_max=queue_max, stale_seconds=stale_seconds)
+
+    try:
+        await registrar.ensure_registered()
+        print("✅ Device registered with Home Assistant")
+
+        await ws_client.connect_with_retry()
+        print("✅ WebSocket connected")
+
+        await _async_monitoring_loop(reader, scanner)
+    except KeyboardInterrupt:
+        print("\n👋 Stopping NFC monitor...")
+    finally:
+        await ws_client.disconnect()
+        reader.disconnect()
+
+    return 0
+
+
 def main():
     print("🎯 PN532 NFC Reader - Home Assistant Events")
     print("=" * 50)
-    
+
+    config = get_nfc_config()
+    ws_enabled = config.get('websocket.enabled', True)
+
+    if ws_enabled:
+        return asyncio.run(_async_main())
+
+    # REST mode: existing synchronous path
     reader = NFCReaderHA()
-    
-    # Test HA connection first
+
     if not reader.test_ha_connection():
         print("\n💡 To fix this:")
         print("1. Go to Home Assistant → Profile → Long-Lived Access Tokens")
         print("2. Create a new token")
         print("3. Copy the token to .env as HA_TOKEN=<your_token>")
         return 1
-    
-    # Connect to serial port
+
     if not reader.connect_serial():
         return 1
-    
+
     try:
         reader.start_monitoring()
     finally:
         reader.disconnect()
-    
+
     return 0
 
 
