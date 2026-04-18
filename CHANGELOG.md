@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.0.1] - 2026-04-18
+
+### Fixed
+- **Serial reconnect**: Service now automatically reconnects to the PN532 when a USB serial disconnect is detected (`[Errno 5] Input/output error`), instead of looping indefinitely on a dead connection
+- **Docker health check**: Health check subprocess previously always reported unhealthy because it checked an in-process `running` flag that was never set in the new process. Now uses a heartbeat file written every 30 seconds by the monitor loop — health check verifies the file is fresh
+
+## [3.0.0] - 2026-03-11
+
+### Added
+- **WebSocket integration**: Service now registers with Home Assistant as a `mobile_app` device and delivers tag scans via the WebSocket API (`webhook/handle`), matching the official iOS/Android companion app path
+- Tags now appear in **Settings → Tags** with last-scanned timestamps and create `tag.<id>` entities automatically
+- `ha_websocket.py`: async WebSocket client with auth, heartbeat, and exponential backoff reconnect
+- `ha_registration.py`: mobile_app device registration; persists `webhook_id` to disk for restart survival
+- `ha_tag_scanner.py`: webhook dispatch with offline queue and stale-entry expiry
+- Six new config variables: `HA_WS_ENABLED`, `HA_WS_HEARTBEAT`, `HA_WS_RECONNECT_MAX`, `DEVICE_NAME`, `SCAN_QUEUE_MAX`, `SCAN_STALE_SECONDS`
+- `README-Docker.md`: dedicated Docker deployment guide
+
+### Changed
+- `nfc_reader_service.py`: full async refactor using `asyncio.run` and `asyncio.to_thread` for non-blocking NFC I/O
+- `nfc_reader_ha_events.py`: WebSocket path added to interactive mode; REST mode preserved
+- `nfc_config.py`: extended with new env vars; PN532 auto-detection improved
+- `docker-compose.yml`: adds `./data` volume to persist registration across container restarts
+
+### Backward Compatible
+- Set `HA_WS_ENABLED=false` to keep the legacy REST `POST /api/events/tag_scanned` behaviour
+
 ## [2.3.0] - 2026-03-10
 
 ### Changed
@@ -27,19 +53,10 @@ All notable changes to this project will be documented in this file.
 - New `payload_type` configuration option in `config.yaml`:
   - `'ndef'` mode: Uses NDEF record content as tag_id (default, backward compatible)
   - `'uuid'` mode: Uses card UID as tag_id (works with all NFC cards including blank ones)
-- Comprehensive documentation updates explaining both payload modes
-- Configuration reference section in README
 
 ### Changed
 - Enhanced Home Assistant event structure documentation with payload examples
 - Updated integration behavior descriptions for both modes
-- Improved troubleshooting section with configuration validation
-
-### Technical Details
-- Events are now fired based on `payload_type` configuration
-- NDEF mode maintains backward compatibility (existing behavior)
-- UUID mode enables detection of blank/unformatted NFC cards
-- Migration notes provided for switching between modes
 
 ## [2.1] - Previous Release
 - Docker deployment support
