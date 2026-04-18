@@ -10,6 +10,7 @@ import logging.handlers
 import os
 import signal
 import sys
+import time
 from pathlib import Path
 
 from ha_registration import DeviceRegistrar, VERSION
@@ -17,6 +18,10 @@ from ha_tag_scanner import TagScanner
 from ha_websocket import HAWebSocketClient, WSState
 from nfc_config import get_nfc_config
 from nfc_reader_ha_events import NFCReaderHA
+
+HEARTBEAT_FILE = Path('/var/log/nfc-reader/heartbeat')
+HEARTBEAT_INTERVAL = 30   # seconds between heartbeat writes
+HEARTBEAT_MAX_AGE = 60    # seconds before health check considers service dead
 
 
 class NFCReaderService:
@@ -42,8 +47,6 @@ class NFCReaderService:
         )
         handler.setFormatter(formatter)
 
-        # Configure root logger so ha_websocket / ha_registration / ha_tag_scanner
-        # module loggers are all captured by the same handlers.
         root = logging.getLogger()
         root.setLevel(logging.INFO)
         root.addHandler(handler)
@@ -139,6 +142,7 @@ class NFCReaderService:
         """Main async monitoring loop; NFC I/O runs in a thread."""
         self.logger.info("Starting NFC card monitoring...")
         last_uid = None
+        last_heartbeat = 0.0
         ws_enabled = self._scanner is not None
 
         try:
@@ -193,7 +197,26 @@ class NFCReaderService:
                             self.logger.debug("Card removed")
                             last_uid = None
 
+                    now = time.time()
+                    if now - last_heartbeat >= HEARTBEAT_INTERVAL:
+                        HEARTBEAT_FILE.write_text(str(now))
+                        last_heartbeat = now
+
                     await asyncio.sleep(0.5)
+
+                except RuntimeError as e:
+                    self.logger.error("Serial device disconnected: %s — attempting reconnect", e)
+                    last_uid = None
+                    self.reader.disconnect()
+                    await asyncio.sleep(5)
+                    try:
+                        reconnected = await asyncio.to_thread(self.reader.connect_serial)
+                        if reconnected:
+                            self.logger.info("Serial device reconnected successfully")
+                        else:
+                            self.logger.error("Serial reconnect failed, will retry")
+                    except Exception as reconnect_err:
+                        self.logger.error("Reconnect error: %s", reconnect_err)
 
                 except Exception as e:
                     self.logger.error("Error in monitoring loop: %s", e)
@@ -215,24 +238,33 @@ class NFCReaderService:
             return False
 
 
+def _check_heartbeat() -> bool:
+    """Subprocess-safe health check: verify the running service wrote a recent heartbeat."""
+    try:
+        age = time.time() - float(HEARTBEAT_FILE.read_text())
+        return age < HEARTBEAT_MAX_AGE
+    except Exception:
+        return False
+
+
 async def async_main() -> int:
     """Async service entry point."""
     if os.geteuid() != 0:
         print("Warning: Service typically runs as root for device access")
 
-    service = NFCReaderService()
-
     if len(sys.argv) > 1:
         command = sys.argv[1].lower()
         if command == 'start':
+            service = NFCReaderService()
             return 0 if await service.start() else 1
         elif command == 'health':
-            return 0 if service.health_check() else 1
+            return 0 if _check_heartbeat() else 1
         else:
             print(f"Usage: {sys.argv[0]} [start|health]")
             return 1
-    else:
-        return 0 if await service.start() else 1
+
+    service = NFCReaderService()
+    return 0 if await service.start() else 1
 
 
 def main() -> int:
