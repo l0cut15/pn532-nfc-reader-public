@@ -14,7 +14,7 @@ import aiohttp
 
 logger = logging.getLogger(__name__)
 
-VERSION = "3.0.0"
+VERSION = "3.0.2"
 _REGISTRATION_FILE = ".nfc_reader_registration.json"
 
 

@@ -137,6 +137,7 @@ class NFCReaderService:
 
         await self._registrar.ensure_registered()
         await self._ws_client.connect_with_retry()
+        self._ws_client._reconnect_task = asyncio.create_task(self._ws_client.run_forever())
 
     async def monitor_loop(self) -> None:
         """Main async monitoring loop; NFC I/O runs in a thread."""
@@ -152,46 +153,38 @@ class NFCReaderService:
 
                     if card:
                         if card['uid'] != last_uid:
-                            log_msg = (
-                                f"NFC Card detected - UID: {card['uid']} (logged only), "
-                                f"Type: {card['type']}"
+                            self.logger.info(
+                                "UID detected: %s, Type: %s",
+                                card['uid'], card['type'],
                             )
-                            if card.get('tag_value'):
-                                log_msg += f", NDEF Value: {card['tag_value']}"
-                            self.logger.info(log_msg)
+                            last_uid = card['uid']
+
+                            tag_value = await asyncio.to_thread(
+                                self.reader.read_ndef, card.get('target_id', 1)
+                            )
+
+                            if tag_value:
+                                self.logger.info("NDEF read: %s", tag_value)
+                            else:
+                                self.logger.info("No NDEF data for UID %s", card['uid'])
 
                             if ws_enabled:
-                                if card.get('tag_value'):
-                                    ok = await self._scanner.scan_tag(card['tag_value'])
+                                if tag_value:
+                                    ok = await self._scanner.scan_tag(tag_value)
                                     if not ok:
                                         self.logger.warning(
-                                            "WS scan failed for tag: %s", card['tag_value']
+                                            "WS scan failed for tag: %s", tag_value
                                         )
-                                else:
-                                    self.logger.info(
-                                        "No NDEF data for UID %s — no event fired",
-                                        card['uid'],
-                                    )
                             else:
-                                fired = await asyncio.to_thread(
-                                    self.reader.fire_tag_scanned_event, card
-                                )
-                                if fired:
-                                    self.logger.info(
-                                        "Fired tag_scanned event: %s", card.get('tag_value')
+                                if tag_value:
+                                    card['tag_value'] = tag_value
+                                    fired = await asyncio.to_thread(
+                                        self.reader.fire_tag_scanned_event, card
                                     )
-                                elif not card.get('tag_value'):
-                                    self.logger.info(
-                                        "No NDEF data for UID %s — no event fired",
-                                        card['uid'],
-                                    )
-                                else:
-                                    self.logger.warning(
-                                        "Failed to fire tag_scanned event for: %s",
-                                        card.get('tag_value'),
-                                    )
-
-                            last_uid = card['uid']
+                                    if not fired:
+                                        self.logger.warning(
+                                            "Failed to fire tag_scanned event for: %s", tag_value
+                                        )
                     else:
                         if last_uid:
                             self.logger.debug("Card removed")

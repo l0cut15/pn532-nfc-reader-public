@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.0.2] - 2026-04-25
+
+### Fixed
+- **WebSocket auto-reconnect**: Service now recovers automatically when Home Assistant closes the WebSocket connection (e.g. after HA restart). Previously the heartbeat would log failures indefinitely without reconnecting. `_recv_loop` now marks the connection as disconnected on close; `_heartbeat_loop` stops on failure; a new `run_forever()` loop in `HAWebSocketClient` reconnects with exponential backoff
+- **NFC NDEF read reliability**: Fixed a race condition where `read_all()` on the USB serial port (CH340) would return empty if the PN532 response had not yet arrived. Changed to `read(1)` (blocks until first ACK byte) + 25ms sleep + `read_all()`. Each block read dropped from ~1000ms to ~30ms; full NDEF read now completes in ~265ms. Cards no longer need to be held still for several seconds
+- **NDEF block count**: Increased read range from 24 to 32 blocks (pages 4–35, 128 bytes) to accommodate HA NFC tag URLs which require ~115 bytes on MIFARE Ultralight EV1 tags
+
+### Changed
+- `scan_for_card()` now returns UID/type only; NDEF reading moved to a separate `read_ndef()` call so UID detection is logged immediately, independent of NDEF read success
+- `docker/build-push-action` bumped from v5 to v6 in GitHub Actions workflow (Node.js 24 compatibility)
+
 ## [3.0.1] - 2026-04-18
 
 ### Fixed

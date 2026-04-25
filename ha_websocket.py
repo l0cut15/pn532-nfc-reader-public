@@ -44,6 +44,7 @@ class HAWebSocketClient:
         self._pending: dict = {}
         self._recv_task = None
         self._heartbeat_task = None
+        self._reconnect_task = None
 
     @property
     def state(self) -> WSState:
@@ -91,13 +92,14 @@ class HAWebSocketClient:
 
     async def disconnect(self) -> None:
         """Cleanly close the WebSocket and stop background tasks."""
-        for task in (self._heartbeat_task, self._recv_task):
+        for task in (self._reconnect_task, self._heartbeat_task, self._recv_task):
             if task and not task.done():
                 task.cancel()
                 try:
                     await task
                 except asyncio.CancelledError:
                     pass
+        self._reconnect_task = None
         self._heartbeat_task = None
         self._recv_task = None
 
@@ -154,17 +156,44 @@ class HAWebSocketClient:
             pass
         except Exception as e:
             logger.error("Recv loop error: %s", e)
+        finally:
+            if self._state not in (WSState.DISCONNECTED, WSState.CONNECTING):
+                logger.info("WebSocket connection closed; marking disconnected")
+                self._set_state(WSState.DISCONNECTED)
 
     async def _heartbeat_loop(self) -> None:
         """Send periodic pings to maintain the connection."""
         try:
-            while True:
+            while self._state == WSState.READY:
                 await asyncio.sleep(self.heartbeat)
-                if self._state == WSState.READY:
-                    try:
-                        await self.send_command({"type": "ping"})
-                        logger.debug("Heartbeat ping/pong OK")
-                    except Exception as e:
-                        logger.warning("Heartbeat failed: %s", e)
+                if self._state != WSState.READY:
+                    break
+                try:
+                    await self.send_command({"type": "ping"})
+                    logger.debug("Heartbeat ping/pong OK")
+                except Exception as e:
+                    logger.warning("Heartbeat failed: %s", e)
+                    self._set_state(WSState.DISCONNECTED)
+                    break
+        except asyncio.CancelledError:
+            pass
+
+    async def run_forever(self) -> None:
+        """Reconnect automatically whenever the connection drops."""
+        try:
+            while True:
+                while self._state != WSState.DISCONNECTED:
+                    await asyncio.sleep(1)
+                logger.info("WebSocket connection lost; reconnecting...")
+                for task in (self._heartbeat_task, self._recv_task):
+                    if task and not task.done():
+                        task.cancel()
+                        try:
+                            await task
+                        except asyncio.CancelledError:
+                            pass
+                self._heartbeat_task = None
+                self._recv_task = None
+                await self.connect_with_retry()
         except asyncio.CancelledError:
             pass

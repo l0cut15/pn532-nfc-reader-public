@@ -5,6 +5,7 @@ Sends tag_scanned events directly to HA API (like mobile app)
 """
 
 import asyncio
+import logging
 import serial
 import time
 import sys
@@ -12,6 +13,8 @@ import requests
 import json
 from datetime import datetime
 from nfc_config import get_nfc_config
+
+logger = logging.getLogger(__name__)
 
 
 class NFCReaderHA:
@@ -70,9 +73,10 @@ class NFCReaderHA:
         self.serial.read_all()  # Clear response
     
     def scan_for_card(self):
-        """Scan for NFC card and return card info if found"""
+        """Scan for NFC card; returns card info (UID/type only, no NDEF) or None."""
         scan_cmd = b'\x00\x00\xFF\x04\xFC\xD4\x4A\x01\x00\xE1\x00'
         try:
+            self.serial.reset_input_buffer()
             self.serial.write(scan_cmd)
             time.sleep(0.1)
             response = self.serial.read_all()
@@ -81,15 +85,12 @@ class NFCReaderHA:
 
         if not response or len(response) < 15:
             return None
-        
-        card_data = self._parse_card_data(response)
-        if card_data:
-            # Try to read NDEF data
-            ndef_data = self._read_ndef_record_1(card_data.get('target_id', 1))
-            if ndef_data:
-                card_data['tag_value'] = ndef_data
-        
-        return card_data
+
+        return self._parse_card_data(response)
+
+    def read_ndef(self, target_id):
+        """Read NDEF value for an already-detected card. Returns tag value string or None."""
+        return self._read_ndef_record_1(target_id)
     
     def _parse_card_data(self, data):
         """Parse card data from PN532 response"""
@@ -144,9 +145,8 @@ class NFCReaderHA:
             if not cc_data:
                 return None
             
-            # Read NDEF data in larger chunks for better performance
-            # Read blocks 4-47 to ensure we get complete NDEF messages (176 bytes total)
-            ndef_data = self._read_tag_data_bulk(target_id, 4, 44)
+            # Read blocks 4-35 (128 bytes — covers HA NDEF URLs up to 115 bytes)
+            ndef_data = self._read_tag_data_bulk(target_id, 4, 32)
             
             if not ndef_data or len(ndef_data) < 4:  # Need at least TLV header
                 return None
@@ -179,14 +179,18 @@ class NFCReaderHA:
             cmd.append(dcs)
             cmd.append(0x00)  # Postamble
             
+            self.serial.reset_input_buffer()
             self.serial.write(bytes(cmd))
-            time.sleep(0.1)  # Optimized response time
-            
-            response = self.serial.read_all()
-            
+            # Block until PN532 ACK first byte arrives, then grab the rest
+            first = self.serial.read(1)
+            if not first:
+                return None
+            time.sleep(0.025)
+            response = first + self.serial.read_all()
+
             if not response or len(response) < 8:
                 return None
-            
+
             # Parse response
             return self._parse_data_exchange_response(response)
             
@@ -208,16 +212,18 @@ class NFCReaderHA:
                 data_bytes[i+6] == 0x41):  # InDataExchange response
                 
                 status = data_bytes[i+7]
-                
+
                 if status == 0x00:  # Success
                     # Extract data payload
                     frame_len = data_bytes[i+3]
                     data_len = frame_len - 3  # Subtract D5, 41, status
-                    
+
                     if i + 8 + data_len <= len(data_bytes):
                         payload = data_bytes[i+8:i+8+data_len]
                         return payload
-        
+                else:
+                    logger.debug("InDataExchange error status: 0x%02X", status)
+
         return None
     
     def _read_tag_data_bulk(self, target_id, start_block, num_blocks):
@@ -241,12 +247,11 @@ class NFCReaderHA:
                 if block_data:
                     all_data.extend(block_data)
                 else:
-                    # For NDEF reading, we need the complete message
-                    # If we're past block 8 and have some data, return what we have
-                    if block_start > start_block + 16 and len(all_data) > 50:
+                    # If we already have data, the tag boundary was reached — return what we have
+                    # If we have nothing yet, an early critical block failed
+                    if len(all_data) > 0:
                         break
                     else:
-                        # Early blocks are critical, fail if we can't read them
                         return None
             
             return all_data if all_data else None
